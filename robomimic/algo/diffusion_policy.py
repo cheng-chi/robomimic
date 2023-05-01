@@ -55,16 +55,16 @@ class DiffusionPolicyUNet(PolicyAlgo):
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
         encoder_kwargs = None
         
-        vision_encoder = ObsNets.ObservationGroupEncoder(
+        obs_encoder = ObsNets.ObservationGroupEncoder(
             observation_group_shapes=observation_group_shapes,
             encoder_kwargs=encoder_kwargs,
         )
         # IMPORTANT!
         # replace all BatchNorm with GroupNorm to work with EMA
         # performance will tank if you forget to do this!
-        vision_encoder = replace_bn_with_gn(vision_encoder)
+        obs_encoder = replace_bn_with_gn(obs_encoder)
         
-        obs_dim = vision_encoder.output_shape()[0]
+        obs_dim = obs_encoder.output_shape()[0]
 
         # create network object
         noise_pred_net = ConditionalUnet1D(
@@ -74,14 +74,121 @@ class DiffusionPolicyUNet(PolicyAlgo):
 
         # the final arch has 2 parts
         nets = nn.ModuleDict({
-            'vision_encoder': vision_encoder,
+            'obs_encoder': obs_encoder,
             'noise_pred_net': noise_pred_net
         })
 
-        import pdb; pdb.set_trace()
         nets = nets.float().to(self.device)
-        self.nets = nets
         
+        # setup noise scheduler
+        noise_scheduler = None
+        if self.algo_config.ddpm.enabled:
+            noise_scheduler = DDPMScheduler(
+                num_train_timesteps=self.algo_config.ddpm.num_train_timesteps,
+                beta_schedule=self.algo_config.ddpm.beta_schedule,
+                clip_sample=self.algo_config.ddpm.clip_sample,
+                prediction_type=self.algo_config.ddpm.prediction_type
+            )
+        else:
+            raise RuntimeError()
+        
+        # setup EMA
+        ema = EMAModel(model=nets, power=0.75)
+        
+        # set attrs
+        self.nets = nets
+        self.noise_scheduler = noise_scheduler
+        self.ema = ema
+        
+    
+    def process_batch_for_training(self, batch):
+        """
+        Processes input batch from a data loader to filter out
+        relevant information and prepare the batch for training.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader
+
+        Returns:
+            input_batch (dict): processed and filtered batch that
+                will be used for training 
+        """
+        To = self.algo_config.horizon.observation_horizon
+        Ta = self.algo_config.horizon.action_horizon
+        Tp = self.algo_config.horizon.prediction_horizon
+
+        input_batch = dict()
+        input_batch["obs"] = {k: batch["obs"][k][:, :To, :] for k in batch["obs"]}
+        input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
+        input_batch["actions"] = batch["actions"][:, :Tp, :]
+        return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
+        
+    def train_on_batch(self, batch, epoch, validate=False):
+        """
+        Training on a single batch of data.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+            epoch (int): epoch number - required by some Algos that need
+                to perform staged training and early stopping
+
+            validate (bool): if True, don't perform any learning updates.
+
+        Returns:
+            info (dict): dictionary of relevant inputs, outputs, and losses
+                that might be relevant for logging
+        """
+        To = self.algo_config.horizon.observation_horizon
+        Ta = self.algo_config.horizon.action_horizon
+        Tp = self.algo_config.horizon.prediction_horizon
+        action_dim = self.ac_dim
+        B = batch['actions'].shape[0]
+        
+        
+        with TorchUtils.maybe_no_grad(no_grad=validate):
+            info = super(DiffusionPolicyUNet, self).train_on_batch(batch, epoch, validate=validate)
+            actions = batch['actions']
+            # encode obs
+            obs_features = self.nets['obs_encoder'](obs_dict=batch["obs"], goal_dict=batch["goal_obs"])
+            
+            # sample noise to add to actions
+            noise = torch.randn(actions.shape, device=self.device)
+            
+            # sample a diffusion iteration for each data point
+            timesteps = torch.randint(
+                0, self.noise_scheduler.config.num_train_timesteps, 
+                (B,), device=self.device
+            ).long()
+            
+            # add noise to the clean actions according to the noise magnitude at each diffusion iteration
+            # (this is the forward diffusion process)
+            noisy_actions = self.noise_scheduler.add_noise(
+                actions, noise, timesteps)
+            
+            # predict the noise residual
+            noise_pred = self.nets['noise_pred_net'](
+                noisy_actions, timesteps, global_cond=obs_features)
+            
+            # L2 loss
+            loss = F.mse_loss(noise_pred, noise)
+            
+            # logging
+            losses = {
+                'l2_loss': loss
+            }
+            info["losses"] = TensorUtils.detach(losses)
+
+            if not validate:
+                # gradient step
+                import pdb; pdb.set_trace()
+                
+                step_info = self._train_step(losses)
+                info.update(step_info)
+
+        return info
 
 # =================== Vision Encoder Utils =====================
 def replace_submodules(
