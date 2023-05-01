@@ -50,15 +50,6 @@ class DiffusionPolicyUNet(PolicyAlgo):
         """
         Creates networks and places them into @self.nets.
         """
-        
-        # # ResNet18 has output dim of 512
-        # vision_feature_dim = 512
-        # # agent_pos is 2 dimensional
-        # lowdim_obs_dim = 2
-        # # observation feature has 514 dims in total per step
-        # obs_dim = vision_feature_dim + lowdim_obs_dim
-        # action_dim = 2
-        
         # set up different observation groups for @MIMO_MLP
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
@@ -77,8 +68,8 @@ class DiffusionPolicyUNet(PolicyAlgo):
 
         # create network object
         noise_pred_net = ConditionalUnet1D(
-            input_dim=action_dim,
-            global_cond_dim=obs_dim*obs_horizon
+            input_dim=self.ac_dim,
+            global_cond_dim=obs_dim*self.algo_config.horizon.observation_horizon
         )
 
         # the final arch has 2 parts
@@ -87,26 +78,12 @@ class DiffusionPolicyUNet(PolicyAlgo):
             'noise_pred_net': noise_pred_net
         })
 
+        import pdb; pdb.set_trace()
         nets = nets.float().to(self.device)
         self.nets = nets
         
 
 # =================== Vision Encoder Utils =====================
-def get_resnet(name:str, weights=None, **kwargs) -> nn.Module:
-    """
-    name: resnet18, resnet34, resnet50
-    weights: "IMAGENET1K_V1", None
-    """
-    # Use standard ResNet implementation from torchvision
-    func = getattr(torchvision.models, name)
-    resnet = func(weights=weights, **kwargs)
-
-    # remove the final fully connected layer
-    # for resnet18, the output dim should be 512
-    resnet.fc = torch.nn.Identity()
-    return resnet
-
-
 def replace_submodules(
         root_module: nn.Module, 
         predicate: Callable[[nn.Module], bool], 

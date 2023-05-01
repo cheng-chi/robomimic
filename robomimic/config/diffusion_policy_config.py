@@ -4,7 +4,7 @@ Config for Diffusion Policy algorithm.
 
 from robomimic.config.base_config import BaseConfig
 
-class BCConfig(BaseConfig):
+class DiffusionPolicyConfig(BaseConfig):
     ALGO_NAME = "diffusion_policy"
     
     def algo_config(self):
@@ -40,13 +40,5 @@ class BCConfig(BaseConfig):
         self.algo.ddpm.beta_schedule = 'squaredcos_cap_v2'
         self.algo.ddpm.clip_sample = True
         self.algo.ddpm.prediction_type = 'epsilon'
-        
-        ## DDIM
-        self.algo.ddim.enabled = False
-        self.algo.ddim.num_train_timesteps = 100
-        self.algo.ddim.num_test_timesteps = 16
-        self.algo.ddim.beta_schedule = 'squaredcos_cap_v2'
-        self.algo.ddim.clip_sample = True
-        self.algo.ddim.prediction_type = 'epsilon'
-        
+                
         
