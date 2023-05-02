@@ -93,13 +93,15 @@ class DiffusionPolicyUNet(PolicyAlgo):
             raise RuntimeError()
         
         # setup EMA
-        ema = EMAModel(model=nets, power=0.75)
+        ema = None
+        if self.algo_config.ema.enabled:
+            ema = EMAModel(model=nets, power=self.algo_config.ema.power)
         
         # set attrs
         self.nets = nets
         self.noise_scheduler = noise_scheduler
         self.ema = ema
-        
+        self.action_check_done = False
     
     def process_batch_for_training(self, batch):
         """
@@ -122,6 +124,16 @@ class DiffusionPolicyUNet(PolicyAlgo):
         input_batch["obs"] = {k: batch["obs"][k][:, :To, :] for k in batch["obs"]}
         input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
         input_batch["actions"] = batch["actions"][:, :Tp, :]
+        
+        # check if actions are normalized to [-1,1]
+        if not self.action_check_done:
+            actions = input_batch["actions"]
+            in_range = (-1 <= actions) & (actions <= 1)
+            all_in_range = torch.all(in_range).item()
+            if not all_in_range:
+                raise ValueError('"actions" must be in range [-1,1] for Diffusion Policy! Check if hdf5_normalize_action is enabled.')
+            self.action_check_done = True
+        
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
         
     def train_on_batch(self, batch, epoch, validate=False):
@@ -183,12 +195,109 @@ class DiffusionPolicyUNet(PolicyAlgo):
 
             if not validate:
                 # gradient step
-                import pdb; pdb.set_trace()
+                policy_grad_norms = TorchUtils.backprop_for_loss(
+                    net=self.nets,
+                    optim=self.optimizers["policy"],
+                    loss=loss,
+                )
                 
-                step_info = self._train_step(losses)
+                # update Exponential Moving Average of the model weights
+                if self.ema is not None:
+                    self.ema.step(self.nets)
+                
+                step_info = {
+                    'policy_grad_norms': policy_grad_norms
+                }
                 info.update(step_info)
 
         return info
+    
+    def log_info(self, info):
+        """
+        Process info dictionary from @train_on_batch to summarize
+        information to pass to tensorboard for logging.
+
+        Args:
+            info (dict): dictionary of info
+
+        Returns:
+            loss_log (dict): name -> summary statistic
+        """
+        log = super(DiffusionPolicyUNet, self).log_info(info)
+        log["Loss"] = info["losses"]["l2_loss"].item()
+        if "policy_grad_norms" in info:
+            log["Policy_Grad_Norms"] = info["policy_grad_norms"]
+        return log
+    
+    def reset(self):
+        """
+        Reset algo state to prepare for environment rollouts.
+        """
+        pass
+    
+    def get_action(self, obs_dict, goal_dict=None):
+        """
+        Get policy action outputs.
+
+        Args:
+            obs_dict (dict): current observation
+            goal_dict (dict): (optional) goal
+
+        Returns:
+            action (torch.Tensor): action tensor
+        """
+        pass
+        # TODO: implement action horizon using queue and reset
+    
+    def _get_action_trajectory(self, obs_dict, goal_dict=None):
+        assert not self.nets.training
+        To = self.algo_config.horizon.observation_horizon
+        Ta = self.algo_config.horizon.action_horizon
+        Tp = self.algo_config.horizon.prediction_horizon
+        action_dim = self.ac_dim
+        num_inference_timesteps = self.algo_config.ddpm.num_inference_timesteps
+        
+        # select network
+        nets = self.nets
+        if self.ema is not None:
+            nets = self.ema.averaged_model
+        
+        # encode obs
+        obs_features = nets['obs_encoder'](
+            obs_dict=obs_dict, goal_dict=goal_dict)
+        B = obs_features.shape[0]
+
+        # reshape observation to (B,obs_horizon*obs_dim)
+        obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
+
+        # initialize action from Guassian noise
+        noisy_action = torch.randn(
+            (B, Tp, action_dim), device=self.device)
+        naction = noisy_action
+        
+        # init scheduler
+        self.noise_scheduler.set_timesteps(num_inference_timesteps)
+
+        for k in self.noise_scheduler.timesteps:
+            # predict noise
+            noise_pred = nets['noise_pred_net'](
+                sample=naction, 
+                timestep=k,
+                global_cond=obs_cond
+            )
+
+            # inverse diffusion step (remove noise)
+            naction = self.noise_scheduler.step(
+                model_output=noise_pred,
+                timestep=k,
+                sample=naction
+            ).prev_sample
+
+        # TODO: process action using Ta
+        action = naction
+        
+        return action
+        
 
 # =================== Vision Encoder Utils =====================
 def replace_submodules(
