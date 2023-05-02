@@ -78,9 +78,14 @@
             "kernel_size": 5,
             "n_groups": 8
         },
+        "ema": {
+            "enabled": true,
+            "power": 0.75
+        },
         "ddpm": {
             "enabled": true,
             "num_train_timesteps": 100,
+            "num_inference_timesteps": 100,
             "beta_schedule": "squaredcos_cap_v2",
             "clip_sample": true,
             "prediction_type": "epsilon"
