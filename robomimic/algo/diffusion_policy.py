@@ -4,6 +4,7 @@ Implementation of Diffusion Policy https://diffusion-policy.cs.columbia.edu/ by 
 from typing import Callable, Optional, Union
 import math
 from collections import OrderedDict
+from packaging.version import parse as parse_version
 
 import torch
 import torch.nn as nn
@@ -53,7 +54,7 @@ class DiffusionPolicyUNet(PolicyAlgo):
         # set up different observation groups for @MIMO_MLP
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
-        encoder_kwargs = None
+        encoder_kwargs = ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder)
         
         obs_encoder = ObsNets.ObservationGroupEncoder(
             observation_group_shapes=observation_group_shapes,
@@ -74,8 +75,10 @@ class DiffusionPolicyUNet(PolicyAlgo):
 
         # the final arch has 2 parts
         nets = nn.ModuleDict({
-            'obs_encoder': obs_encoder,
-            'noise_pred_net': noise_pred_net
+            'policy': nn.ModuleDict({
+                'obs_encoder': obs_encoder,
+                'noise_pred_net': noise_pred_net
+            })
         })
 
         nets = nets.float().to(self.device)
@@ -126,13 +129,13 @@ class DiffusionPolicyUNet(PolicyAlgo):
         input_batch["actions"] = batch["actions"][:, :Tp, :]
         
         # check if actions are normalized to [-1,1]
-        if not self.action_check_done:
-            actions = input_batch["actions"]
-            in_range = (-1 <= actions) & (actions <= 1)
-            all_in_range = torch.all(in_range).item()
-            if not all_in_range:
-                raise ValueError('"actions" must be in range [-1,1] for Diffusion Policy! Check if hdf5_normalize_action is enabled.')
-            self.action_check_done = True
+        # if not self.action_check_done:
+        #     actions = input_batch["actions"]
+        #     in_range = (-1 <= actions) & (actions <= 1)
+        #     all_in_range = torch.all(in_range).item()
+        #     if not all_in_range:
+        #         raise ValueError('"actions" must be in range [-1,1] for Diffusion Policy! Check if hdf5_normalize_action is enabled.')
+        #     self.action_check_done = True
         
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
         
@@ -163,8 +166,19 @@ class DiffusionPolicyUNet(PolicyAlgo):
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(DiffusionPolicyUNet, self).train_on_batch(batch, epoch, validate=validate)
             actions = batch['actions']
+            
             # encode obs
-            obs_features = self.nets['obs_encoder'](obs_dict=batch["obs"], goal_dict=batch["goal_obs"])
+            inputs = {
+                'obs': batch["obs"],
+                'goal': batch["goal_obs"]
+            }
+            for k in self.obs_shapes:
+                # first two dimensions should be [B, T] for inputs
+                assert inputs['obs'][k].ndim - 2 == len(self.obs_shapes[k])
+            obs_features = TensorUtils.time_distributed(inputs, self.nets['policy']['obs_encoder'], inputs_as_kwargs=True)
+            assert obs_features.ndim == 3  # [B, T, D]
+
+            obs_cond = obs_features.flatten(start_dim=1)
             
             # sample noise to add to actions
             noise = torch.randn(actions.shape, device=self.device)
@@ -181,8 +195,8 @@ class DiffusionPolicyUNet(PolicyAlgo):
                 actions, noise, timesteps)
             
             # predict the noise residual
-            noise_pred = self.nets['noise_pred_net'](
-                noisy_actions, timesteps, global_cond=obs_features)
+            noise_pred = self.nets['policy']['noise_pred_net'](
+                noisy_actions, timesteps, global_cond=obs_cond)
             
             # L2 loss
             loss = F.mse_loss(noise_pred, noise)
@@ -233,7 +247,7 @@ class DiffusionPolicyUNet(PolicyAlgo):
         """
         Reset algo state to prepare for environment rollouts.
         """
-        pass
+        import pdb; pdb.set_trace()
     
     def get_action(self, obs_dict, goal_dict=None):
         """
@@ -246,7 +260,7 @@ class DiffusionPolicyUNet(PolicyAlgo):
         Returns:
             action (torch.Tensor): action tensor
         """
-        pass
+        import pdb; pdb.set_trace()
         # TODO: implement action horizon using queue and reset
     
     def _get_action_trajectory(self, obs_dict, goal_dict=None):
@@ -263,12 +277,20 @@ class DiffusionPolicyUNet(PolicyAlgo):
             nets = self.ema.averaged_model
         
         # encode obs
-        obs_features = nets['obs_encoder'](
-            obs_dict=obs_dict, goal_dict=goal_dict)
+        import pdb; pdb.set_trace()
+        inputs = {
+            'obs': obs_dict,
+            'goal': goal_dict
+        }
+        for k in self.obs_shapes:
+            # first two dimensions should be [B, T] for inputs
+            assert inputs['obs'][k].ndim - 2 == len(self.obs_shapes[k])
+        obs_features = TensorUtils.time_distributed(inputs, self.nets['policy']['obs_encoder'], inputs_as_kwargs=True)
+        assert obs_features.ndim == 3  # [B, T, D]
         B = obs_features.shape[0]
 
         # reshape observation to (B,obs_horizon*obs_dim)
-        obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
+        obs_cond = obs_features.flatten(start_dim=1)
 
         # initialize action from Guassian noise
         noisy_action = torch.randn(
@@ -280,7 +302,7 @@ class DiffusionPolicyUNet(PolicyAlgo):
 
         for k in self.noise_scheduler.timesteps:
             # predict noise
-            noise_pred = nets['noise_pred_net'](
+            noise_pred = nets['policy']['noise_pred_net'](
                 sample=naction, 
                 timestep=k,
                 global_cond=obs_cond
@@ -295,6 +317,7 @@ class DiffusionPolicyUNet(PolicyAlgo):
 
         # TODO: process action using Ta
         action = naction
+        import pdb; pdb.set_trace()
         
         return action
         
@@ -313,6 +336,9 @@ def replace_submodules(
     """
     if predicate(root_module):
         return func(root_module)
+
+    if parse_version(torch.__version__) < parse_version('1.9.0'):
+        raise ImportError('This function requires pytorch >= 1.9.0')
 
     bn_list = [k.split('.') for k, m 
         in root_module.named_modules(remove_duplicate=True) 
