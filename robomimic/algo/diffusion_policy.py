@@ -1,7 +1,7 @@
 """
 Implementation of Diffusion Policy https://diffusion-policy.cs.columbia.edu/ by Cheng Chi
 """
-from typing import Callable, Optional, Union
+from typing import Callable, Union
 import math
 from collections import OrderedDict, deque
 from packaging.version import parse as parse_version
@@ -9,17 +9,12 @@ from packaging.version import parse as parse_version
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
 # requires diffusers==0.11.1
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.training_utils import EMAModel
 
-import robomimic.models.base_nets as BaseNets
 import robomimic.models.obs_nets as ObsNets
-import robomimic.models.policy_nets as PolicyNets
-import robomimic.models.vae_nets as VAENets
-import robomimic.utils.loss_utils as LossUtils
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
