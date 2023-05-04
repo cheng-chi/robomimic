@@ -131,13 +131,13 @@ class DiffusionPolicyUNet(PolicyAlgo):
         input_batch["actions"] = batch["actions"][:, :Tp, :]
         
         # check if actions are normalized to [-1,1]
-        # if not self.action_check_done:
-        #     actions = input_batch["actions"]
-        #     in_range = (-1 <= actions) & (actions <= 1)
-        #     all_in_range = torch.all(in_range).item()
-        #     if not all_in_range:
-        #         raise ValueError('"actions" must be in range [-1,1] for Diffusion Policy! Check if hdf5_normalize_action is enabled.')
-        #     self.action_check_done = True
+        if not self.action_check_done:
+            actions = input_batch["actions"]
+            in_range = (-1 <= actions) & (actions <= 1)
+            all_in_range = torch.all(in_range).item()
+            if not all_in_range:
+                raise ValueError('"actions" must be in range [-1,1] for Diffusion Policy! Check if hdf5_normalize_action is enabled.')
+            self.action_check_done = True
         
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
         
