@@ -3,7 +3,7 @@ Implementation of Diffusion Policy https://diffusion-policy.cs.columbia.edu/ by 
 """
 from typing import Callable, Optional, Union
 import math
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from packaging.version import parse as parse_version
 
 import torch
@@ -99,12 +99,14 @@ class DiffusionPolicyUNet(PolicyAlgo):
         ema = None
         if self.algo_config.ema.enabled:
             ema = EMAModel(model=nets, power=self.algo_config.ema.power)
-        
+                
         # set attrs
         self.nets = nets
         self.noise_scheduler = noise_scheduler
         self.ema = ema
         self.action_check_done = False
+        self.obs_queue = None
+        self.action_queue = None
     
     def process_batch_for_training(self, batch):
         """
@@ -247,22 +249,44 @@ class DiffusionPolicyUNet(PolicyAlgo):
         """
         Reset algo state to prepare for environment rollouts.
         """
-        import pdb; pdb.set_trace()
+        # setup inference queues
+        To = self.algo_config.horizon.observation_horizon
+        Ta = self.algo_config.horizon.action_horizon
+        obs_queue = deque(maxlen=To)
+        action_queue = deque(maxlen=Ta)
+        self.obs_queue = obs_queue
+        self.action_queue = action_queue
     
     def get_action(self, obs_dict, goal_dict=None):
         """
         Get policy action outputs.
 
         Args:
-            obs_dict (dict): current observation
+            obs_dict (dict): current observation [1, Do]
             goal_dict (dict): (optional) goal
 
         Returns:
-            action (torch.Tensor): action tensor
+            action (torch.Tensor): action tensor [1, Da]
         """
-        import pdb; pdb.set_trace()
-        # TODO: implement action horizon using queue and reset
-    
+        # obs_dict: key: [1,D]
+        To = self.algo_config.horizon.observation_horizon
+        Ta = self.algo_config.horizon.action_horizon
+
+        # make sure we have at least To observations in obs_queue
+        # if not enough, repeat
+        # if already full, append one to the obs_queue
+        n_repeats = max(To - len(self.obs_queue), 1)
+        self.obs_queue.extend([obs_dict] * n_repeats)
+        
+        if len(self.action_queue) == 0:
+            # no actions left, run inference
+            import pdb; pdb.set_trace()
+        
+        # has action, execute from left to right
+        action = self.action_queue.popleft()
+        
+        return action
+        
     def _get_action_trajectory(self, obs_dict, goal_dict=None):
         assert not self.nets.training
         To = self.algo_config.horizon.observation_horizon
@@ -277,7 +301,6 @@ class DiffusionPolicyUNet(PolicyAlgo):
             nets = self.ema.averaged_model
         
         # encode obs
-        import pdb; pdb.set_trace()
         inputs = {
             'obs': obs_dict,
             'goal': goal_dict
