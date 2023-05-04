@@ -280,7 +280,16 @@ class DiffusionPolicyUNet(PolicyAlgo):
         
         if len(self.action_queue) == 0:
             # no actions left, run inference
-            import pdb; pdb.set_trace()
+            # turn obs_queue into dict of tensors (concat at T dim)
+            obs_dict_list = TensorUtils.list_of_flat_dict_to_dict_of_list(list(self.obs_queue))
+            obs_dict_tensor = dict((k, torch.cat(v, dim=0).unsqueeze(0)) for k,v in obs_dict_list.items())
+            
+            # run inference
+            # [1,T,Da]
+            action_sequence = self._get_action_trajectory(obs_dict=obs_dict_tensor)
+            
+            # put actions into the queue
+            self.action_queue.extend(action_sequence[0])
         
         # has action, execute from left to right
         action = self.action_queue.popleft()
@@ -338,10 +347,10 @@ class DiffusionPolicyUNet(PolicyAlgo):
                 sample=naction
             ).prev_sample
 
-        # TODO: process action using Ta
-        action = naction
-        import pdb; pdb.set_trace()
-        
+        # process action using Ta
+        start = To - 1
+        end = start + Ta
+        action = naction[:,start:end]
         return action
         
 
@@ -606,7 +615,6 @@ class ConditionalUnet1D(nn.Module):
         # 1. time
         timesteps = timestep
         if not torch.is_tensor(timesteps):
-            # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
             timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
         elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
             timesteps = timesteps[None].to(sample.device)
