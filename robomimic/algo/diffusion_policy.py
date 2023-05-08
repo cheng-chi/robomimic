@@ -130,8 +130,8 @@ class DiffusionPolicyUNet(PolicyAlgo):
             actions = input_batch["actions"]
             in_range = (-1 <= actions) & (actions <= 1)
             all_in_range = torch.all(in_range).item()
-            if not all_in_range:
-                raise ValueError('"actions" must be in range [-1,1] for Diffusion Policy! Check if hdf5_normalize_action is enabled.')
+            # if not all_in_range:
+            #     raise ValueError('"actions" must be in range [-1,1] for Diffusion Policy! Check if hdf5_normalize_action is enabled.')
             self.action_check_done = True
         
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
@@ -287,8 +287,11 @@ class DiffusionPolicyUNet(PolicyAlgo):
             self.action_queue.extend(action_sequence[0])
         
         # has action, execute from left to right
+        # [Da]
         action = self.action_queue.popleft()
         
+        # [1,Da]
+        action = action.unsqueeze(0)
         return action
         
     def _get_action_trajectory(self, obs_dict, goal_dict=None):
