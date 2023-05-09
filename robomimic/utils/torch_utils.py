@@ -167,10 +167,10 @@ def backprop_for_loss(net, optim, loss, max_grad_norm=None, retain_graph=False):
 
     # compute grad norms
     grad_norms = 0.
-    for p in net.parameters():
-        # only clip gradients for parameters for which requires_grad is True
-        if p.grad is not None:
-            grad_norms += p.grad.data.norm(2).pow(2).item()
+    # for p in net.parameters():
+    #     # only clip gradients for parameters for which requires_grad is True
+    #     if p.grad is not None:
+    #         grad_norms += p.grad.data.norm(2).pow(2).item()
 
     # step
     optim.step()

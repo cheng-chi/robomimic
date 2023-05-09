@@ -270,7 +270,7 @@ def to_device(x, device):
     return recursive_dict_list_tuple_apply(
         x,
         {
-            torch.Tensor: lambda x, d=device: x.to(d),
+            torch.Tensor: lambda x, d=device: x.to(d, non_blocking=True),
             type(None): lambda x: x,
         }
     )

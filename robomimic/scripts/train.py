@@ -150,7 +150,8 @@ def train(config, device):
         batch_size=config.train.batch_size,
         shuffle=(train_sampler is None),
         num_workers=config.train.num_data_workers,
-        drop_last=True
+        drop_last=True,
+        pin_memory=True
     )
 
     if config.experiment.validate:
@@ -163,7 +164,8 @@ def train(config, device):
             batch_size=config.train.batch_size,
             shuffle=(valid_sampler is None),
             num_workers=num_workers,
-            drop_last=True
+            drop_last=True,
+            pin_memory=True
         )
     else:
         valid_loader = None
