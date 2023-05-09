@@ -7,6 +7,7 @@ import h5py
 import numpy as np
 from copy import deepcopy
 from contextlib import contextmanager
+import threadpoolctl
 
 import torch.utils.data
 
@@ -512,13 +513,14 @@ class SequenceDataset(torch.utils.data.Dataset):
         """
         if self.hdf5_cache_mode == "all":
             return self.getitem_cache[index]
-        return self.get_item(index)
+        # limits get_item to a single thread to avoid CPU oversubscription
+        with threadpoolctl.threadpool_limits(limits=1):
+            return self.get_item(index)
 
     def get_item(self, index):
         """
         Main implementation of getitem when not using cache.
         """
-
         demo_id = self._index_to_demo_id[index]
         demo_start_index = self._demo_id_to_start_indices[demo_id]
         demo_length = self._demo_id_to_demo_length[demo_id]
