@@ -33,6 +33,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         hdf5_normalize_action=None,
         filter_by_attribute=None,
         load_next_obs=True,
+        obs_seq_length=None
     ):
         """
         Dataset class for fetching sequences of experience.
@@ -111,6 +112,10 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         self.seq_length = seq_length
         assert self.seq_length >= 1
+        
+        if obs_seq_length is None:
+            obs_seq_length = seq_length
+        self.obs_seq_length = obs_seq_length
 
         self.goal_mode = goal_mode
         if self.goal_mode is not None:
@@ -543,7 +548,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             index_in_demo=index_in_demo,
             keys=self.obs_keys,
             num_frames_to_stack=self.n_frame_stack - 1,
-            seq_length=self.seq_length,
+            seq_length=self.obs_seq_length,
             prefix="obs"
         )
         if self.hdf5_normalize_obs:

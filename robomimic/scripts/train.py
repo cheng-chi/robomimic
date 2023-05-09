@@ -130,6 +130,16 @@ def train(config, device):
     # load training data
     trainset, validset = TrainUtils.load_data_for_training(
         config, obs_keys=shape_meta["all_obs_keys"])
+    
+    # trick to set obs_seq_length
+    if config.algo_name == "diffusion_policy":
+        from robomimic.utils.dataset import SequenceDataset
+        obs_seq_length = config.algo.horizon.observation_horizon
+        if isinstance(trainset, SequenceDataset):
+            trainset.obs_seq_length = obs_seq_length
+        if isinstance(validset, SequenceDataset):
+            validset.obs_seq_length = obs_seq_length
+    
     train_sampler = trainset.get_dataset_sampler()
     print("\n============= Training Dataset =============")
     print(trainset)
