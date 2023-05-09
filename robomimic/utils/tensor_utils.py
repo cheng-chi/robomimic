@@ -772,22 +772,46 @@ def pad_sequence_single(seq, padding, batched=False, pad_same=True, pad_values=N
     assert pad_same or pad_values is not None
     if pad_values is not None:
         assert isinstance(pad_values, float)
-    repeat_func = np.repeat if isinstance(seq, np.ndarray) else torch.repeat_interleave
-    concat_func = np.concatenate if isinstance(seq, np.ndarray) else torch.cat
-    ones_like_func = np.ones_like if isinstance(seq, np.ndarray) else torch.ones_like
+    full_like_func = np.full_like if isinstance(seq, np.ndarray) else torch.full_like
+    empty_like_func = np.empty_like if isinstance(seq, np.ndarray) else torch.empty_like
     seq_dim = 1 if batched else 0
-
-    begin_pad = []
-    end_pad = []
-
-    if padding[0] > 0:
-        pad = seq[[0]] if pad_same else ones_like_func(seq[[0]]) * pad_values
-        begin_pad.append(repeat_func(pad, padding[0], seq_dim))
-    if padding[1] > 0:
-        pad = seq[[-1]] if pad_same else ones_like_func(seq[[-1]]) * pad_values
-        end_pad.append(repeat_func(pad, padding[1], seq_dim))
-
-    return concat_func(begin_pad + [seq] + end_pad, seq_dim)
+    
+    if padding[0] == 0 and padding[1] == 0:
+        # fast path
+        return seq
+            
+    start_idx = padding[0]
+    end_idx = padding[0] + seq.shape[seq_dim]
+    out_shape = list(seq.shape)
+    out_shape[seq_dim] += sum(padding)
+    all_slices = [slice(None) for _ in seq.shape]
+    
+    # allocate memory
+    out_seq = None
+    if pad_values is None:
+        out_seq = empty_like_func(seq, shape=out_shape)
+    else:
+        out_seq = full_like_func(seq, pad_values, shape=out_shape)
+    
+    # fill in data from seq
+    this_slices = list(all_slices)
+    this_slices[seq_dim] = slice(start_idx, end_idx)
+    out_seq[tuple(this_slices)] = seq
+    
+    if pad_same:
+        if padding[0] > 0:
+            begin_slice = list(all_slices)
+            begin_slice[seq_dim] = slice(None, start_idx)
+            first_slice = list(all_slices)
+            first_slice[seq_dim] = slice(start_idx,start_idx+1)
+            out_seq[tuple(begin_slice)] = seq[tuple(first_slice)]
+        if padding[1] > 0:
+            end_slice = list(all_slices)
+            end_slice[seq_dim] = slice(end_idx, None)
+            last_slice = list(all_slices)
+            last_slice[seq_dim] = slice(end_idx-1, end_idx)
+            out_seq[tuple(end_slice)] = seq[tuple(last_slice)]
+    return out_seq
 
 
 def pad_sequence(seq, padding, batched=False, pad_same=True, pad_values=None):
