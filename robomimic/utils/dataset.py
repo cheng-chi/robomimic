@@ -92,11 +92,12 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.hdf5_use_swmr = hdf5_use_swmr
         self.hdf5_normalize_obs = hdf5_normalize_obs
         self._hdf5_file = None
+        self.thread_limit_set = False
         
         if hdf5_normalize_action is None:
             hdf5_normalize_action = self.hdf5_file['data'].attrs.get('absolute_actions', False)
         self.hdf5_normalize_action = hdf5_normalize_action
-            
+
 
         assert hdf5_cache_mode in ["all", "low_dim", None]
         self.hdf5_cache_mode = hdf5_cache_mode
@@ -514,8 +515,10 @@ class SequenceDataset(torch.utils.data.Dataset):
         if self.hdf5_cache_mode == "all":
             return self.getitem_cache[index]
         # limits get_item to a single thread to avoid CPU oversubscription
-        with threadpoolctl.threadpool_limits(limits=1):
-            return self.get_item(index)
+        if not self.thread_limit_set:
+            threadpoolctl.threadpool_limits(limits=2)
+            self.thread_limit_set = True
+        return self.get_item(index)
 
     def get_item(self, index):
         """
