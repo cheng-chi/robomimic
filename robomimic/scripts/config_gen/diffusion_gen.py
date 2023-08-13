@@ -41,7 +41,7 @@ def make_generator_helper(args):
         key="train.num_epochs",
         name="",
         group=-1,
-        values=[1000],
+        values=[5000],
     )
     generator.add_param(
         key="experiment.rollout.rate",
@@ -53,7 +53,7 @@ def make_generator_helper(args):
         key="experiment.rollout.n",
         name="",
         group=-1,
-        values=[10],
+        values=[50],
     )
 
     if args.env == "r2d2":
@@ -119,7 +119,68 @@ def make_generator_helper(args):
                 "abs",
             ],
         )
+    elif args.env == "tool_hang":
+        generator.add_param(
+            key="train.data",
+            name="ds",
+            group=2,
+            values=[
+                [
+                    # TODO: point to the hdf5 file
+                    {"path": "/home/cchi/dev/robomimic_r2d2/datasets/tool_hang/ph/image_abs.hdf5"},
+                ],
+            ],
+            value_names=[
+                "tool_hang",
+            ],
+        )
+        
+        generator.add_param(
+            key="train.action_keys",
+            name="ac_keys",
+            group=-1,
+            values=[
+                [
+                    "action_dict/abs_pos",
+                    "action_dict/abs_rot_6d",
+                    "action_dict/gripper",
+                ],
+            ],
+            value_names=[
+                "abs",
+            ],
+        )
+        
+        generator.add_param(
+            key="train.batch_size",
+            name="batch_size",
+            group=-1,
+            values=[
+                64,
+            ],
+            value_names=[
+                "abs",
+            ],
+        )
+        
+        generator.add_param(
+            key="observation.encoder.rgb.obs_randomizer_kwargs.crop_height",
+            name="",
+            group=2,
+            values=[
+                216,
+            ],
+        )
+        generator.add_param(
+            key="observation.encoder.rgb.obs_randomizer_kwargs.crop_width",
+            name="",
+            group=2,
+            values=[
+                216,
+            ],
+        )
     else:
+        import pdb; pdb.set_trace()
         raise ValueError
 
     if "experiment.ckpt_path" in generator.parameters:
@@ -151,7 +212,7 @@ def make_generator_helper(args):
         name="",
         group=-1,
         values=[
-            "/home/cchi/dev/robomimic_r2d2/datasets/experiment_results/debug/{env}/{mod}/{algo_name_short}".format(
+            "/home/cchi/dev/robomimic_r2d2/datasets/experiment_results/{env}/{mod}/{algo_name_short}".format(
                 env=args.env,
                 mod=args.mod,
                 algo_name_short=algo_name_short,
